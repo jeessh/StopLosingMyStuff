@@ -1,0 +1,4 @@
+/sls
+*.test
+*.out
+.DS_Store
