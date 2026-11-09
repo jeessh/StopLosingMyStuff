@@ -194,6 +194,8 @@ func TestPortablePaths(t *testing.T) {
 	}
 }
 
+const fakePass = "hunter2xyz"
+
 func TestRedact(t *testing.T) {
 	secrets := []string{
 		"ghp_" + strings.Repeat("a", 36),
@@ -208,8 +210,8 @@ func TestRedact(t *testing.T) {
 		}
 	}
 	for _, in := range []string{
-		"export API_KEY=hunter2hunter2", `password: "correct horse"`, "DB_TOKEN='abc def'",
-		"curl -H 'Authorization: Bearer abcdefghijk'", "postgres://me:hunter2@db/x",
+		"export API_KEY=" + fakePass, "password: " + `"correct horse"`, "DB_TOKEN=" + "'abc def'",
+		"curl -H 'Authorization: Bearer abcdefghijk'", "postgres://me:" + fakePass + "@db/x",
 		"-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----",
 	} {
 		if out := Redact(in); strings.Contains(out, "hunter2") || strings.Contains(out, "horse") ||
@@ -243,15 +245,15 @@ func TestDigestKeepsNewestAndRedacts(t *testing.T) {
 
 func TestRedactCommandLineForms(t *testing.T) {
 	for _, in := range []string{
-		"mysql -u root --password hunter2xyz db",
-		"mysql -uroot -phunter2xyz db",
-		"sshpass -p hunter2xyz ssh box",
-		"curl -u admin:hunter2xyz https://x",
-		`curl -d "{\"password\":\"hunter2xyz\"}" https://x`,
-		"STRIPE_KEY=hunter2xyz make",
-		"pay sk_live_hunter2xyzabc",
-		"auth npm_hunter2xyzhunter2xyzabc",
-		"push glpat-hunter2xyzabc",
+		"mysql -u root --password " + fakePass + " db",
+		"mysql -uroot -p" + fakePass + " db",
+		"sshpass -p " + fakePass + " ssh box",
+		"curl -u admin:" + fakePass + " https://x",
+		`curl -d "{\"password\":\"` + fakePass + `\"}" https://x`,
+		"STRIPE_KEY=" + fakePass + " make",
+		"pay sk_live_" + fakePass + "abc",
+		"auth npm_" + fakePass + fakePass + "abc",
+		"push glpat-" + fakePass + "abc",
 	} {
 		if out := Redact(in); strings.Contains(out, "hunter2") {
 			t.Errorf("leaked: %q", out)

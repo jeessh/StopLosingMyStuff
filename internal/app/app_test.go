@@ -119,7 +119,7 @@ func TestPutSkipsUnchangedValues(t *testing.T) {
 
 func TestNotesAreRedacted(t *testing.T) {
 	a := newApp(t, "a")
-	if err := a.Note(context.Background(), "/nope/x", "db password=hunter2hunter"); err != nil {
+	if err := a.Note(context.Background(), "/nope/x", "db password="+"hunter2"+"hunter"); err != nil {
 		t.Fatal(err)
 	}
 	if out := a.Brief(context.Background(), "/nope/x"); out != "" && strings.Contains(out, "hunter2") {

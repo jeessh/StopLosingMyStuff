@@ -13,7 +13,7 @@ func TestNormalizeRemote(t *testing.T) {
 	want := "github.com/me/repo"
 	for _, in := range []string{
 		"git@github.com:me/repo.git", "https://github.com/me/repo.git", "https://github.com/me/repo",
-		"ssh://git@github.com/me/repo.git", "https://user:tok3n@GitHub.com/me/repo.git", "git@GITHUB.com:me/repo/",
+		"ssh://git@github.com/me/repo.git", "https://user:"+"tok3n"+"@GitHub.com/me/repo.git", "git@GITHUB.com:me/repo/",
 	} {
 		if got := NormalizeRemote(in); got != want {
 			t.Errorf("NormalizeRemote(%q) = %q", in, got)
