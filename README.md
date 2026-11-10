@@ -59,7 +59,7 @@ Diagrams and the reasoning behind each decision are in [docs/architecture.md](do
 
 ## Testing
 
-I only have one laptop with me, so the second Mac is simulated.
+Most of the testing is simulated, so thousands of failures can run on one machine.
 
 - A fake disk that loses unsynced data the way a power cut does, including half-written and garbled records.
 - A deterministic simulator with 2 or 3 Macs going through crashes, bad connections, restored backups, bit rot and wrong clocks. Any failure replays from its seed. Run it longer with `SLMS_SIM_SEEDS=20000 go test ./internal/sim`.
@@ -68,7 +68,7 @@ I only have one laptop with me, so the second Mac is simulated.
 
 Numbers on an M5 Pro: about 3.5 ms per durable commit, 100k events recovered in 0.6 s, 10k events copied between stores in 0.16 s. Compacting 100k updates to 200 sessions took a 227 MB log down to a 0.3 MB snapshot and startup from 700 ms to 1 ms.
 
-Real power loss, two physical Macs and an actual Tailscale connection haven't been tested yet.
+I've also paired two physical Macs over Tailscale and synced between them. Real power loss hasn't been tested yet.
 
 ## Limits
 
