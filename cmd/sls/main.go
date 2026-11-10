@@ -39,6 +39,7 @@ const usage = `sls keeps project context in sync between your Macs.
   sls track [DIR]                follow a folder that isn't a git repo
   sls service add NAME PORT      watch a local service
   sls doctor                     check that everything is healthy
+  sls compact                    shrink the log now
   sls daemon [--listen ADDR] [--no-summaries]
 `
 
@@ -103,7 +104,7 @@ func run(args []string) error {
 		return install(rest)
 	case "service":
 		return service(rest)
-	case "status", "doctor":
+	case "status", "doctor", "compact":
 		return show(app.Request{Cmd: cmd})
 	case "brief", "decisions":
 		return show(app.Request{Cmd: cmd, Dir: dirArg(rest)})

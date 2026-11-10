@@ -2,7 +2,9 @@ package replica
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +71,37 @@ func TestPullOverTLSUsesFirstWorkingAddress(t *testing.T) {
 	}
 }
 
+func TestLargeSnapshotCrossesTheNetworkInChunks(t *testing.T) {
+	a, b := openStore(t), openStore(t)
+	value := strings.Repeat("x", 60_000)
+	for i := range 200 {
+		body, _ := store.Set("p", fmt.Sprintf("k%d", i), value, nil)
+		if _, err := a.Commit(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := a.Compact(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Removed == 0 || res.SnapshotBytes <= chunkSize {
+		t.Fatalf("test needs a multi-chunk snapshot: %+v", res)
+	}
+	ida, idb := identity(t), identity(t)
+	addr := serve(t, a, ida, func(fp string) bool { return fp == idb.Fingerprint })
+	c, err := Dial(context.Background(), PeerConfig{Fingerprint: ida.Fingerprint, Addrs: []string{addr}}, idb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, _, err := Pull(context.Background(), b, c); err != nil {
+		t.Fatal(err)
+	}
+	if b.Hash() != a.Hash() {
+		t.Fatal("stores differ after snapshot transfer")
+	}
+}
+
 func TestStrangerIsRejected(t *testing.T) {
 	a, b := openStore(t), openStore(t)
 	commit(t, a, 3)
@@ -121,6 +154,9 @@ type futurePeer struct{}
 func (futurePeer) Hello(context.Context, Hello) (Hello, error) { return Hello{Proto: Proto + 1}, nil }
 func (futurePeer) Pull(context.Context, store.Vector) (Batch, error) {
 	return Batch{}, nil
+}
+func (futurePeer) Snapshot(context.Context, string, int64) (Chunk, error) {
+	return Chunk{}, nil
 }
 
 func TestIdleStrangersDoNotBlockPeers(t *testing.T) {

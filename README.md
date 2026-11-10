@@ -46,11 +46,14 @@ sls next "ship the login"   set the next step, settles a conflict
 sls track ~/mods/skyrim     follow a folder that isn't a git repo
 sls service add render 8188 watch a local service
 sls doctor                  check that everything is healthy
+sls compact                 shrink the log now, also runs on its own
 ```
 
 ## How it works
 
 Each Mac keeps an append-only log. Macs pull entries they're missing, and state is calculated from the log in a way that doesn't care what order entries arrive in. If both Macs change the same thing while apart, both versions are kept and you get asked.
+
+Old entries get replaced by a snapshot once they stop mattering. A Mac that's been away too long merges the snapshot instead of replaying entries that no longer exist.
 
 Diagrams and the reasoning behind each decision are in [docs/architecture.md](docs/architecture.md). Everything that can go wrong and the test covering it is in [docs/edge-cases.md](docs/edge-cases.md).
 
@@ -63,13 +66,13 @@ I only have one laptop with me, so the second Mac is simulated.
 - Real daemons talking over real TLS on one machine, with `kill -9` during writes.
 - `scripts/mutate.py` plants known bugs, like removing an fsync, and checks the tests catch them.
 
-Numbers on an M5 Pro: about 3.5 ms per durable commit, 100k events recovered in 0.6 s, 10k events copied between stores in 0.16 s.
+Numbers on an M5 Pro: about 3.5 ms per durable commit, 100k events recovered in 0.6 s, 10k events copied between stores in 0.16 s. Compacting 100k updates to 200 sessions took a 227 MB log down to a 0.3 MB snapshot and startup from 700 ms to 1 ms.
 
 Real power loss, two physical Macs and an actual Tailscale connection haven't been tested yet.
 
 ## Limits
 
-The log isn't compacted yet. It tracks your code but doesn't copy it, that's still git's job. Reading transcripts depends on Claude Code's file format, which isn't a public API, so `sls doctor` warns if it stops parsing.
+It tracks your code but doesn't copy it, that's still git's job. Reading transcripts depends on Claude Code's file format, which isn't a public API, so `sls doctor` warns if it stops parsing.
 
 Secret redaction is pattern based, so it catches common formats and not everything.
 

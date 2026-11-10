@@ -18,6 +18,27 @@ What can go wrong, what happens, and the test that proves it.
 | A command runs while the daemon restarts | It waits for the daemon instead of failing | same |
 | Two daemons on one data folder | The second one is refused | `TestDataSurvivesAndSecondDaemonIsRefused` |
 
+## Compaction
+
+| What happens | Result | Test |
+|---|---|---|
+| Power cut at any step of compaction | Nothing is removed until both snapshot copies are on disk, so either the old log or the snapshot is complete | `TestCrashAtEveryCompactionStep` |
+| Disk fills up during compaction | The snapshot fails, the log is untouched and keeps working | `TestDiskFullDuringCompactionChangesNothing` |
+| One snapshot copy goes bad | The other one is used and the bad copy is rewritten | `TestDamagedSnapshotCopyIsRepaired` |
+| Both snapshot copies go bad | Refuses to start and changes nothing, because the log may hold events nothing else has. Moving the `snap` folder aside rebuilds from the other Mac | `TestBothCopiesDamagedRefusesToStartAndKeepsTheLog`, `TestMovingDamagedSnapshotsAsideRebuildsFromPeer` |
+| Damage in an old log file the snapshot already covers | Only that file's remainder is set aside, newer entries are kept | `TestDamageInSnapshottedFileKeepsNewerEvents` |
+| The other Mac hasn't confirmed some entries | Those log files stay until it does, or until it's been gone 30 days | `TestCompactionWaitsForPeers`, `TestOnlyRecentlySeenPairedPeersHoldBackCleanup` |
+| A Mac comes back after its entries were removed | It merges the snapshot and keeps its own offline work, conflicts included | `TestAwayMacKeepsItsOwnWorkAndConflictsAfterSnapshot` |
+| A Mac still holds a value the snapshot replaced | The old value stays gone, even though the record of replacing it was cleaned up | `TestSupersededWriteStaysDeadAfterPrunedSnapshot` |
+| A brand new Mac pairs after compaction | It starts from the snapshot | `TestCompactedMacRestartsAndCatchesUpANewOne` |
+| Snapshot bigger than one network frame | Sent in 4 MB pieces and checked as a whole | `TestLargeSnapshotCrossesTheNetworkInChunks` |
+| Snapshot damaged in transit | Refused, nothing changes | `TestDamagedTransferIsRefused` |
+| Snapshot disagrees with history this Mac has | Refused and shown in `sls doctor` | `TestSnapshotFromAnotherHistoryIsRefused` |
+| Peer compacted past a writer this Mac rejected | Sync from that peer stops with a clear error and doesn't download the snapshot until a restart clears the rejection | `TestRejectedWriterIsNotDownloadedAgain` |
+| Entry from a newer version this build can't read | Kept whole in the snapshot and passed along, and can't revive anything once a Mac that understands it has moved on | `TestEventsFromNewerBuildsSurviveCompaction`, `TestStaleRelayedEventCannotReviveAReplacedValue` |
+| `sls status` reads while the daemon compacts | The read notices and starts over | `TestReadOnlySeesCompactedStore` |
+| Any mix of the above across 2 or 3 Macs | Final state matches replaying every acknowledged event | `TestCompactionNeverChangesTheResult` |
+
 ## Syncing
 
 | What happens | Result | Test |
@@ -72,7 +93,7 @@ What can go wrong, what happens, and the test that proves it.
 
 ## Not handled yet
 
-- The log is never compacted. A heavy user adds a few hundred MB a year.
+- Deleted list items are remembered forever, so re-reading an old transcript can't bring them back. They're small, but compaction can't remove them.
 - Code and non-git files aren't copied, only tracked. Git still owns your code.
 - A live conversation doesn't move between Macs. The next session starts with the context instead.
 - If a Mac dies before syncing, the other one has to wait for it to come back for the last few events.

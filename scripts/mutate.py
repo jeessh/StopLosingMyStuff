@@ -10,6 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WAL, STORE = "internal/wal/wal.go", "internal/store/store.go"
 STATE, NET = "internal/state/state.go", "internal/replica/net.go"
 SESSION, WATCH = "internal/capture/session.go", "internal/capture/watcher.go"
+SNAP = "internal/store/snapshot.go"
 
 MUTANTS = [
     ("no fsync on append", WAL,
@@ -43,6 +44,36 @@ MUTANTS = [
     ("summary erases conflict", "internal/app/app.go",
      "\tif len(cur) < 2 {\n\t\treturn cur\n\t}\n",
      "\tif len(cur) >= 0 {\n\t\treturn cur\n\t}\n", "./internal/app"),
+    ("cleanup ignores peers", SNAP,
+     "\t\t\tif seq > v[o] {\n\t\t\t\treturn false\n\t\t\t}\n", "\t\t\t_ = v\n", "./internal/store"),
+    ("merge revives superseded write", STATE,
+     "if !r.Dead[id] && (both || !mine(w.ID)) {", "if _ = both; !r.Dead[id] {", "./internal/state ./internal/sim"),
+    ("dead ids pruned too early", STATE,
+     "if id, ok := event.ParseID(key); ok && seen(id) {", "if _, ok := event.ParseID(key); ok {", "./internal/state ./internal/sim"),
+    ("snapshot checksum ignored", SNAP,
+     "\tif hex.EncodeToString(sum[:]) != string(rest[:sumSize]) {\n\t\treturn nil, errBadSnapshot\n\t}\n",
+     "\t_ = sum\n", "./internal/store"),
+    ("snapshot written once", SNAP,
+     'var snapCopies = []string{"a", "b"}', 'var snapCopies = []string{"a"}', "./internal/store ./internal/sim"),
+    ("snapshot not durable before cleanup", SNAP,
+     "if err := vfs.WriteAtomic(s.fs, filepath.Join(s.snapDir(), snapName(gen, c)), data); err != nil {",
+     "if err := func() error { f, err := s.fs.Create(filepath.Join(s.snapDir(), snapName(gen, c))); if err != nil { return err }; _, err = f.Write(data); return err }(); err != nil {",
+     "./internal/store ./internal/sim"),
+    ("replay reapplies snapshot events", STORE,
+     "\tif e.Seq <= s.base[e.Origin] {", "\tif false {", "./internal/store ./internal/sim"),
+    ("installed snapshot not saved", SNAP,
+     "if _, err := s.writeSnapshot(snapshot{Vector: vector, Heads: heads, State: merged, Unknown: unknown, SealedBefore: active}); err != nil {",
+     "if err := error(nil); err != nil {", "./internal/store ./internal/sim"),
+    ("events from newer builds dropped", STORE,
+     "\tif !state.Knows(e) {\n\t\ts.unknown = append(s.unknown, e)\n\t}\n", "", "./internal/store"),
+    ("stale relayed event accepted", SNAP,
+     "\t\tcase e.Seq <= s.vector[e.Origin]:\n", "", "./internal/store"),
+    ("damaged snapshots replaced by empty start", SNAP,
+     "\tif good == nil {\n\t\treturn bad, fmt.Errorf(", "\tif good == nil {\n\t\treturn bad, nil\n\t}\n\tif good == nil {\n\t\treturn bad, fmt.Errorf(", "./internal/store ./internal/sim"),
+    ("covered damage discards newer events", "internal/wal/wal.go",
+     "\t\tif n < covered && !last {\n\t\t\tcontinue\n\t\t}\n", "", "./internal/wal ./internal/store"),
+    ("snapshot from other history accepted", SNAP,
+     "\t\tif head != s.heads[o] {\n\t\t\treturn fmt.Errorf(\"%w at %s:%d\", errFork, o, seq)\n\t\t}\n", "", "./internal/store"),
 ]
 
 

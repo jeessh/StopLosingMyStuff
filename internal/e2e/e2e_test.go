@@ -323,6 +323,35 @@ func TestKillDuringWritesLosesNothing(t *testing.T) {
 	}
 }
 
+func TestCompactedMacRestartsAndCatchesUpANewOne(t *testing.T) {
+	a, c := newMac(t, "maca"), newMac(t, "macc")
+	repoA := a.repo("git@github.com:me/demo.git")
+	repoC := c.repo("git@github.com:me/demo.git")
+	a.start()
+	for i := range 10 {
+		if out, err := a.cmd(repoA, "note", fmt.Sprintf("old-note-%d", i)); err != nil {
+			t.Fatalf("note: %v: %s", err, out)
+		}
+	}
+	if out := a.run("compact"); !strings.Contains(out, "removed 1 log files") {
+		t.Fatalf("compact: %s", out)
+	}
+	a.kill()
+	a.start()
+	got := a.run("decisions", repoA)
+	if strings.Count(got, "old-note-") != 10 {
+		t.Fatalf("after restart:\n%s", got)
+	}
+	pair(t, a, c)
+	c.start()
+	waitFor(t, "compacted notes on macc", func() bool {
+		return strings.Count(c.run("decisions", repoC), "old-note-") == 10
+	})
+	if out := a.run("doctor"); strings.Contains(out, "stopped accepting") {
+		t.Fatalf("doctor:\n%s", out)
+	}
+}
+
 func TestDataSurvivesAndSecondDaemonIsRefused(t *testing.T) {
 	a := newMac(t, "maca")
 	a.start()

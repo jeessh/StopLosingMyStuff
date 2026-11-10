@@ -65,6 +65,7 @@ type App struct {
 	Extra  func() string
 	Health func() capture.Health
 	mu     sync.Mutex
+	acks   map[string]peerAck
 }
 
 func (a *App) Do(ctx context.Context, r Request) Response {
@@ -85,6 +86,8 @@ func (a *App) Do(ctx context.Context, r Request) Response {
 		err = a.SetText(ctx, r.Dir, r.Cmd, r.Text)
 	case "track":
 		err = a.Track(ctx, r.Dir)
+	case "compact":
+		out, err = a.Compact()
 	default:
 		err = fmt.Errorf("unknown command %q", r.Cmd)
 	}
@@ -375,9 +378,14 @@ func (a *App) Doctor() string {
 		total += n
 	}
 	fmt.Fprintf(&b, "events: %d from %d writers\n", total, len(v))
+	size, files := a.Store.LogSize()
+	fmt.Fprintf(&b, "log: %s in %d files\n", mb(size), files)
 	if r := a.Store.Recovery(); r.TornBytes > 0 || r.Quarantined > 0 {
 		fmt.Fprintf(&b, "last start: cut %d torn bytes and quarantined %d bytes, all saved as .bad files in %s\n",
 			r.TornBytes, r.Quarantined, filepath.Join(a.Dir, "log"))
+	}
+	if r := a.Store.Recovery(); r.BadSnapshots > 0 {
+		fmt.Fprintf(&b, "last start: found %d damaged snapshot copies\n", r.BadSnapshots)
 	}
 	for origin, why := range a.Store.Forks() {
 		fmt.Fprintf(&b, "PROBLEM: stopped accepting writer %s: %s\n", origin, why)

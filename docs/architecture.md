@@ -74,6 +74,26 @@ flowchart TD
   F --> P["pull from the other Mac<br/>missing events come back"]
 ```
 
+## Compaction
+
+The log only grows, and most of it is old copies of things that have since changed. Compaction saves the current state as a snapshot and removes log files nothing needs anymore.
+
+```mermaid
+flowchart TD
+    A["Seal the current log file"] --> B["Write the snapshot twice, fsync each"]
+    B --> C{"Does every recently seen Mac have this file's entries?"}
+    C -->|yes| D["Remove the file, oldest first"]
+    C -->|no| E["Keep it for now"]
+    F["Mac asks for entries that are gone"] --> G["Told to fetch the snapshot"]
+    G --> H["Downloads it in pieces and checks the hash"]
+    H --> I["Merges it with local state and saves before showing it"]
+    I --> J["Pulls whatever is newer as usual"]
+```
+
+The usual warning about compaction is that you can only delete what every machine already has. Here that's only about saving bandwidth. The snapshot is itself a mergeable copy of the state, so a Mac that fell behind merges it and loses nothing, including its own offline work.
+
+A snapshot also records how far it has seen for each writer. That's what lets the list of replaced entries be cleaned up: if one side has seen an entry and no longer holds it, it was replaced there.
+
 ## Decisions
 
 | Decision | Why | What it costs |
@@ -82,6 +102,8 @@ flowchart TD
 | Wrote the log by hand instead of using SQLite | The whole point is being able to test exactly what survives a power cut, and it keeps the project at zero dependencies | More code to get right, which is what the fake disk and the simulator are for |
 | New writer ID every time a process starts writing | A restored Time Machine backup or a cloned disk can't reuse old sequence numbers, so that whole class of split-history bugs can't happen | The version vector grows by one entry per daemon run |
 | Multi-value registers instead of last-write-wins | Two people's next steps are both information. Throwing one away based on a clock is how work gets lost | Someone sometimes has to pick one |
+| Merge snapshots instead of waiting for every Mac | A Mac gone for months can't block cleanup forever, and restored backups just work | A snapshot transfer when a Mac is far behind, and the merge has to be correct, so it's tested against replaying every event |
+| Write each snapshot twice | Once old log files are gone, the snapshot is the only local copy | Twice the snapshot size, which is tiny next to the log it replaces |
 | Pull only replication | Retrying is always safe because a retry is the same question again. There are no acks to lose | A short delay, softened by a hello that tells the other side to pull now |
 | Pinned TLS certificates instead of trusting the network | Works the same over any network and doesn't depend on Tailscale being set up | Pairing is one copy and paste each way |
 | Dial every address at once | Going from Ethernet to home Wi-Fi needs no config change, the address that works wins | A few wasted connection attempts |
@@ -100,7 +122,7 @@ flowchart TD
 | `event` | Event format and tamper-evident hash chain |
 | `hlc` | Hybrid logical clock for display ordering |
 | `state` | The merge logic. Order independent and idempotent |
-| `store` | Log + state + per-writer index |
+| `store` | Log + state + per-writer index, snapshots and compaction |
 | `replica` | Pull protocol and the TLS transport |
 | `sim` | Deterministic simulator: crashes, bad links, restored backups, bit rot |
 | `capture` | Transcript tailing, session facts, secret redaction |

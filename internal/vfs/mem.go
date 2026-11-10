@@ -147,6 +147,7 @@ func (m *MemFS) Rename(from, to string) error {
 func (m *MemFS) Remove(path string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.step()
 	if m.live[path] == nil {
 		return fs.ErrNotExist
 	}
@@ -249,6 +250,21 @@ func (m *MemFS) Clone() *MemFS {
 		c.live[p], c.durable[p] = b, b
 	}
 	return c
+}
+
+// RotAll damages every durable file whose name ends in suffix.
+func (m *MemFS) RotAll(suffix string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	found := false
+	for p, n := range m.durable {
+		if strings.HasSuffix(p, suffix) && len(n.synced) > 0 {
+			n.synced[len(n.synced)-1] ^= 1
+			n.data = bytes.Clone(n.synced)
+			found = true
+		}
+	}
+	return found
 }
 
 // Rot flips one durable byte in a random file whose name ends in suffix.

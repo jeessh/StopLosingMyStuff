@@ -33,6 +33,7 @@ const (
 	repoEvery      = time.Minute
 	serviceEvery   = 30 * time.Second
 	syncEvery      = 20 * time.Second
+	compactEvery   = time.Hour
 	syncDebounce   = time.Second
 	resolveFor     = 5 * time.Minute
 	resolveRetry   = time.Minute
@@ -156,8 +157,8 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer st.Close()
 	d.store = st
-	if r := st.Recovery(); r.TornBytes > 0 || r.Quarantined > 0 {
-		d.log.Printf("recovered log: %d torn bytes cut, %d bytes quarantined", r.TornBytes, r.Quarantined)
+	if r := st.Recovery(); r.TornBytes > 0 || r.Quarantined > 0 || r.BadSnapshots > 0 {
+		d.log.Printf("recovered log: %d torn bytes cut, %d bytes quarantined, %d snapshot copies damaged", r.TornBytes, r.Quarantined, r.BadSnapshots)
 	}
 	if d.id, err = replica.LoadIdentity(cfg.Dir); err != nil {
 		return err
@@ -199,6 +200,7 @@ func Run(ctx context.Context, cfg Config) error {
 	run(d.repoLoop)
 	run(d.serviceLoop)
 	run(d.syncLoop)
+	run(d.compactLoop)
 
 	var result error
 	select {
@@ -632,6 +634,28 @@ func (d *daemon) checkServices(ctx context.Context) {
 	}
 }
 
+func (d *daemon) compactLoop(ctx context.Context) {
+	tick := time.NewTicker(compactEvery)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		ran, err := d.app.CompactIfDue()
+		if err != nil {
+			d.log.Printf("compact: %v", err)
+		} else if ran {
+			d.log.Printf("compacted the log")
+		}
+		if serr := d.store.Err(); serr != nil {
+			d.fail(serr)
+			return
+		}
+	}
+}
+
 func (d *daemon) syncLoop(ctx context.Context) {
 	tick := time.NewTicker(syncEvery)
 	defer tick.Stop()
@@ -688,6 +712,7 @@ func (d *daemon) syncPeer(ctx context.Context, p replica.PeerConfig) {
 		}
 		st.err, st.lastOK = "", time.Now()
 		st.behind = d.store.Missing(them.Vector)
+		d.app.SawPeer(p.Name, them.Vector)
 	}
 	d.peers[p.Name] = st
 }

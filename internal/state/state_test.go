@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/jeessh/StopLosingMyStuff/internal/event"
@@ -111,5 +112,49 @@ func TestUnknownOpsAreIgnored(t *testing.T) {
 	s.Apply(event.Event{Origin: "a", Seq: 2, Body: []byte(`not json`)})
 	if got := s.Projects["p"].Get("x"); len(got) != 0 {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestMergeMatchesReplayEvenWhenPruned(t *testing.T) {
+	for seed := range uint64(400) {
+		r := rand.New(rand.NewPCG(seed, 9))
+		var events [2][]event.Event
+		full, sides := New(), [2]*State{New(), New()}
+		seq := [2]uint64{}
+		origins := [2]string{"a", "b"}
+		var live [2][]event.ID
+		for i := range 60 {
+			n := r.IntN(2)
+			seq[n]++
+			id := event.ID{Origin: origins[n], Seq: seq[n]}
+			b := event.Body{Project: "p", Op: event.OpSet, Key: "k", Over: live[n]}
+			if other := events[1-n]; len(other) > 0 && r.IntN(3) == 0 {
+				b.Over = append(slices.Clone(b.Over), other[r.IntN(len(other))].ID())
+			}
+			if r.IntN(4) == 0 {
+				b = event.Body{Project: "p", Op: event.OpAdd, Key: "s", Elem: fmt.Sprint(r.IntN(5))}
+			} else {
+				live[n] = []event.ID{id}
+			}
+			e := ev(id.Origin, id.Seq, int64(i), b)
+			events[n] = append(events[n], e)
+			full.Apply(e)
+			sides[n].Apply(e)
+		}
+		seen := func(n int) func(event.ID) bool {
+			return func(id event.ID) bool { return id.Origin == origins[n] && id.Seq <= seq[n] }
+		}
+		sides[0].Prune(seen(0))
+		sides[1].Prune(seen(1))
+		ab, ba := sides[0].Clone(), sides[1].Clone()
+		ab.Merge(sides[1], seen(0), seen(1))
+		ba.Merge(sides[0], seen(1), seen(0))
+		if ab.Hash() != full.Hash() || ba.Hash() != full.Hash() {
+			t.Fatalf("seed %d: merge differs from replay", seed)
+		}
+		ab.Merge(ba, func(event.ID) bool { return true }, func(event.ID) bool { return true })
+		if ab.Hash() != full.Hash() {
+			t.Fatalf("seed %d: merge is not idempotent", seed)
+		}
 	}
 }

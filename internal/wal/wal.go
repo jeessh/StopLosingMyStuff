@@ -16,13 +16,15 @@ import (
 
 const (
 	headerSize = 8
+	Overhead   = headerSize
 	maxRecord  = 1 << 20
 	suffix     = ".seg"
 )
 
 var (
-	castagnoli = crc32.MakeTable(crc32.Castagnoli)
-	ErrBad     = errors.New("bad record")
+	castagnoli  = crc32.MakeTable(crc32.Castagnoli)
+	ErrBad      = errors.New("bad record")
+	ErrVanished = errors.New("segment removed during scan")
 )
 
 type Loc struct {
@@ -31,8 +33,9 @@ type Loc struct {
 }
 
 type Recovery struct {
-	TornBytes   int
-	Quarantined int
+	TornBytes    int
+	Quarantined  int
+	BadSnapshots int
 }
 
 type Visit func(Loc, []byte) error
@@ -123,8 +126,9 @@ func allZero(b []byte) bool {
 
 // Open replays every valid record and repairs the log. A torn tail is cut.
 // Anything else stops replay there and moves the remainder aside, since records
-// after a hole can't be trusted to be contiguous.
-func Open(fsys vfs.FS, dir string, limit int64, visit Visit) (*WAL, Recovery, error) {
+// after a hole can't be trusted to be contiguous. Segments below covered are
+// already in a snapshot, so damage there only costs that segment's remainder.
+func Open(fsys vfs.FS, dir string, limit int64, covered uint32, visit Visit) (*WAL, Recovery, error) {
 	var rec Recovery
 	if err := fsys.MkdirAll(dir); err != nil {
 		return nil, rec, err
@@ -162,6 +166,9 @@ func Open(fsys vfs.FS, dir string, limit int64, visit Visit) (*WAL, Recovery, er
 		}
 		if err := truncate(fsys, path, int64(good)); err != nil {
 			return nil, rec, err
+		}
+		if n < covered && !last {
+			continue
 		}
 		for _, later := range segs[i+1:] {
 			p := filepath.Join(dir, segName(later))
@@ -202,7 +209,7 @@ func Open(fsys vfs.FS, dir string, limit int64, visit Visit) (*WAL, Recovery, er
 }
 
 // Scan reads without repairing, so it is safe alongside a live writer.
-func Scan(fsys vfs.FS, dir string, visit Visit) error {
+func Scan(fsys vfs.FS, dir string, covered uint32, visit Visit) error {
 	segs, err := segments(fsys, dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -212,10 +219,13 @@ func Scan(fsys vfs.FS, dir string, visit Visit) error {
 	}
 	for _, n := range segs {
 		data, err := fsys.ReadFile(filepath.Join(dir, segName(n)))
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrVanished
+		}
 		if err != nil {
 			return err
 		}
-		if _, clean, _ := scan(n, data, visit); !clean {
+		if _, clean, _ := scan(n, data, visit); !clean && n >= covered {
 			return nil
 		}
 	}
@@ -298,6 +308,48 @@ func (w *WAL) Append(records [][]byte) ([]Loc, error) {
 	return locs, nil
 }
 
+// Roll seals the current segment so compaction can remove it later.
+func (w *WAL) Roll() error {
+	if w.failed != nil {
+		return w.failed
+	}
+	if w.size == 0 {
+		return nil
+	}
+	if err := w.roll(w.seg + 1); err != nil {
+		w.failed = err
+		return err
+	}
+	return nil
+}
+
+// Active is the segment still being written, which can't be removed.
+func (w *WAL) Active() uint32 { return w.seg }
+
+// Remove deletes a sealed segment and syncs the directory, so a crash can't
+// bring back a later segment without the earlier one. Failure is sticky for
+// the same reason a failed fsync is.
+func (w *WAL) Remove(seg uint32) error {
+	if w.failed != nil {
+		return w.failed
+	}
+	if seg >= w.seg {
+		return fmt.Errorf("segment %d is still active", seg)
+	}
+	err := w.fs.Remove(filepath.Join(w.dir, segName(seg)))
+	if err == nil {
+		err = w.fs.SyncDir(w.dir)
+	}
+	if err != nil {
+		w.failed = err
+		return err
+	}
+	if w.cacheN == seg {
+		w.cacheN, w.cacheB = 0, nil
+	}
+	return nil
+}
+
 func (w *WAL) Read(l Loc) ([]byte, error) {
 	if w.cacheN != l.Seg || int(l.Off)+headerSize > len(w.cacheB) || w.short(l) {
 		data, err := w.fs.ReadFile(filepath.Join(w.dir, segName(l.Seg)))
@@ -305,6 +357,9 @@ func (w *WAL) Read(l Loc) ([]byte, error) {
 			return nil, err
 		}
 		w.cacheN, w.cacheB = l.Seg, data
+	}
+	if int(l.Off) > len(w.cacheB) {
+		return nil, ErrBad
 	}
 	rest := w.cacheB[l.Off:]
 	if len(rest) < headerSize {

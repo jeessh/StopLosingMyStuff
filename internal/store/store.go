@@ -49,9 +49,19 @@ type Store struct {
 	vector   Vector
 	heads    map[string]string
 	index    map[string][]wal.Loc
+	top      map[string]uint64
+	segs     map[uint32]*segInfo
 	forks    map[string]string
 	origin   string
 	recovery wal.Recovery
+	fs       vfs.FS
+	dir      string
+	base     Vector
+	unknown  []event.Event
+	gen      uint64
+	since    int64
+
+	sealedBefore uint32
 }
 
 func Open(fsys vfs.FS, dir string, opt Options) (*Store, error) {
@@ -61,42 +71,81 @@ func Open(fsys vfs.FS, dir string, opt Options) (*Store, error) {
 	if opt.SegmentSize == 0 {
 		opt.SegmentSize = defaultSegment
 	}
-	s := &Store{
-		opt:    opt,
-		clock:  hlc.New(opt.Now),
-		state:  state.New(),
-		vector: Vector{},
-		heads:  map[string]string{},
-		index:  map[string][]wal.Loc{},
-		forks:  map[string]string{},
-	}
+	s := &Store{opt: opt, fs: fsys, dir: dir, clock: hlc.New(opt.Now), forks: map[string]string{}}
+	s.reset()
 	if err := fsys.MkdirAll(dir); err != nil {
 		return nil, err
 	}
 	if err := s.loadNode(fsys, dir); err != nil {
 		return nil, err
 	}
-	logDir := filepath.Join(dir, "log")
-	visit := func(l wal.Loc, rec []byte) error {
-		var e event.Event
-		if err := json.Unmarshal(rec, &e); err != nil {
-			return err
-		}
-		if err := s.check(e); err != nil {
-			return err
-		}
-		s.absorb(e, l)
-		return nil
-	}
 	if opt.ReadOnly {
-		return s, wal.Scan(fsys, logDir, visit)
+		return s, s.readAll()
 	}
-	var err error
-	s.log, s.recovery, err = wal.Open(fsys, logDir, opt.SegmentSize, visit)
+	bad, err := s.loadSnapshot()
 	if err != nil {
 		return nil, err
 	}
+	s.log, s.recovery, err = wal.Open(fsys, s.logDir(), opt.SegmentSize, s.sealedBefore, s.visit)
+	if err != nil {
+		return nil, err
+	}
+	s.recovery.BadSnapshots = bad
+	s.finishIndex()
 	return s, nil
+}
+
+func (s *Store) logDir() string { return filepath.Join(s.dir, "log") }
+
+func (s *Store) reset() {
+	s.state = state.New()
+	s.vector, s.base = Vector{}, Vector{}
+	s.heads = map[string]string{}
+	s.index = map[string][]wal.Loc{}
+	s.top = map[string]uint64{}
+	s.segs = map[uint32]*segInfo{}
+	s.unknown, s.gen, s.since, s.sealedBefore = nil, 0, 0, 0
+}
+
+// readAll retries if a daemon compacts underneath it. Every compaction writes
+// a new snapshot before removing anything, so an unchanged generation means
+// the scan saw a consistent log.
+func (s *Store) readAll() error {
+	for try := 0; ; try++ {
+		s.reset()
+		if _, err := s.loadSnapshot(); err != nil {
+			return err
+		}
+		err := wal.Scan(s.fs, s.logDir(), s.sealedBefore, s.visit)
+		s.finishIndex()
+		gens, lerr := snapGens(s.fs, s.snapDir())
+		same := lerr == nil && (len(gens) == 0 && s.gen == 0 || len(gens) > 0 && gens[0] == s.gen)
+		if same && !errors.Is(err, wal.ErrVanished) {
+			return err
+		}
+		if try == 5 {
+			return errors.New("log kept changing while reading it")
+		}
+	}
+}
+
+func (s *Store) visit(l wal.Loc, rec []byte) error {
+	var e event.Event
+	if err := json.Unmarshal(rec, &e); err != nil {
+		return err
+	}
+	if e.Seq <= s.base[e.Origin] {
+		if err := e.Verify(); err != nil {
+			return err
+		}
+		s.place(e, l, len(rec))
+		return nil
+	}
+	if err := s.check(e); err != nil {
+		return err
+	}
+	s.absorb(e, l, len(rec))
+	return nil
 }
 
 func (s *Store) loadNode(fsys vfs.FS, dir string) error {
@@ -150,13 +199,46 @@ func (s *Store) check(e event.Event) error {
 	return nil
 }
 
-func (s *Store) absorb(e event.Event, l wal.Loc) {
+func (s *Store) absorb(e event.Event, l wal.Loc, size int) {
 	s.vector[e.Origin] = e.Seq
 	s.heads[e.Origin] = e.Hash
-	s.index[e.Origin] = append(s.index[e.Origin], l)
+	s.place(e, l, size)
+	s.since += int64(size + wal.Overhead)
+	if !state.Knows(e) {
+		s.unknown = append(s.unknown, e)
+	}
 	s.state.Apply(e)
 	s.clock.Observe(e.Time)
 }
+
+// place records where an event lives. The index for an origin always ends at
+// its newest event, so a jump from a snapshot starts it over.
+func (s *Store) place(e event.Event, l wal.Loc, size int) {
+	if len(s.index[e.Origin]) > 0 && s.top[e.Origin]+1 != e.Seq {
+		s.index[e.Origin] = nil
+	}
+	s.index[e.Origin] = append(s.index[e.Origin], l)
+	s.top[e.Origin] = e.Seq
+	info := s.segs[l.Seg]
+	if info == nil {
+		info = &segInfo{last: map[string]uint64{}}
+		s.segs[l.Seg] = info
+	}
+	info.last[e.Origin] = e.Seq
+	info.bytes += int64(size + wal.Overhead)
+}
+
+func (s *Store) finishIndex() {
+	for o := range s.index {
+		if s.top[o] != s.vector[o] {
+			delete(s.index, o)
+			delete(s.top, o)
+		}
+	}
+}
+
+// floor is the newest event of an origin this node can no longer serve.
+func (s *Store) floor(o string) uint64 { return s.vector[o] - uint64(len(s.index[o])) }
 
 // Commit makes local changes durable. Each process writes under a fresh origin
 // chosen at its first commit, so sequence numbers are never reused even if the
@@ -220,7 +302,7 @@ func (s *Store) write(events []event.Event) error {
 		return err
 	}
 	for i, e := range events {
-		s.absorb(e, locs[i])
+		s.absorb(e, locs[i], len(records[i]))
 	}
 	return nil
 }
@@ -296,6 +378,11 @@ func (s *Store) Since(have Vector, maxCount, maxBytes int) ([]event.Event, bool,
 		origins = append(origins, o)
 	}
 	sort.Strings(origins)
+	for _, o := range origins {
+		if have[o] < s.floor(o) {
+			return nil, false, ErrSnapshotNeeded
+		}
+	}
 	var out []event.Event
 	size := 0
 	for _, o := range origins {
@@ -306,7 +393,7 @@ func (s *Store) Since(have Vector, maxCount, maxBytes int) ([]event.Event, bool,
 			if len(out) >= maxCount || size >= maxBytes {
 				return out, true, nil
 			}
-			rec, err := s.log.Read(s.index[o][seq-1])
+			rec, err := s.log.Read(s.index[o][seq-s.floor(o)-1])
 			if err != nil {
 				return out, false, fmt.Errorf("read %s:%d: %w", o, seq, err)
 			}

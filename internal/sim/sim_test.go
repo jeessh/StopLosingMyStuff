@@ -42,6 +42,7 @@ type world struct {
 	r   *rand.Rand
 	now int64
 	m   []*machine
+	all *state.State
 }
 
 func (w *world) open(m *machine) {
@@ -75,6 +76,13 @@ func (l link) Hello(ctx context.Context, h replica.Hello) (replica.Hello, error)
 	return l.Local.Hello(ctx, h)
 }
 
+func (l link) Snapshot(ctx context.Context, id string, offset int64) (replica.Chunk, error) {
+	if l.r.IntN(100) < l.loss/4 {
+		return replica.Chunk{}, errLink
+	}
+	return l.Local.Snapshot(ctx, id, offset)
+}
+
 func (l link) Pull(ctx context.Context, have store.Vector) (replica.Batch, error) {
 	if l.r.IntN(100) < l.loss {
 		return replica.Batch{}, errLink
@@ -97,10 +105,11 @@ type config struct {
 	machines int
 	steps    int
 	destroy  bool
+	compact  bool
 }
 
 func newWorld(t *testing.T, seed uint64, cfg config) *world {
-	w := &world{t: t, r: rand.New(rand.NewPCG(seed, 77)), now: 1_000_000}
+	w := &world{t: t, r: rand.New(rand.NewPCG(seed, 77)), now: 1_000_000, all: state.New()}
 	for i := range cfg.machines {
 		m := &machine{name: fmt.Sprintf("mac%d", i), fs: vfs.NewMem()}
 		w.open(m)
@@ -131,7 +140,74 @@ func (w *world) commit(m *machine) []event.ID {
 	if err != nil {
 		w.t.Fatalf("commit: %v", err)
 	}
+	have := m.s.Vector()
+	have[ids[0].Origin]--
+	events, _, err := m.s.Since(have, 1, 1<<20)
+	if err != nil || len(events) != 1 {
+		w.t.Fatalf("read back commit: %d events, %v", len(events), err)
+	}
+	w.all.Apply(events[0])
 	return ids
+}
+
+// guarded runs fn, which may hit a planned crash, and reports if it did.
+func guarded(fn func()) (crashed bool) {
+	defer func() {
+		if v := recover(); v != nil {
+			if v != vfs.ErrCrash {
+				panic(v)
+			}
+			crashed = true
+		}
+	}()
+	fn()
+	return false
+}
+
+func (w *world) settle(m *machine, crashed bool) {
+	m.fs.CrashAfter(0)
+	m.fs.FailNextSyncs(0)
+	m.fs.FailNextWrites(0)
+	if crashed || m.s.Err() != nil {
+		m.fs.Crash(w.r)
+		w.open(m)
+	}
+}
+
+// compact may wait for every peer, wait for nobody, or be cut off partway.
+func (w *world) compact(m *machine) {
+	var wait []store.Vector
+	if w.r.IntN(2) == 0 {
+		for _, other := range w.m {
+			if other != m {
+				wait = append(wait, other.s.Vector())
+			}
+		}
+	}
+	fault := w.r.IntN(4)
+	crashed := guarded(func() {
+		switch fault {
+		case 0:
+			m.fs.CrashAfter(1 + w.r.IntN(16))
+		case 1:
+			m.fs.FailNextSyncs(1 + w.r.IntN(2))
+		case 2:
+			m.fs.FailNextWrites(1)
+		}
+		if _, err := m.s.Compact(wait); err != nil && fault == 3 {
+			w.t.Fatalf("compact: %v", err)
+		}
+	})
+	w.settle(m, crashed)
+}
+
+// crashingPull cuts the power at some point during a pull or snapshot install.
+func (w *world) crashingPull(a, b *machine) {
+	crashed := guarded(func() {
+		a.fs.CrashAfter(1 + w.r.IntN(12))
+		_, _, _ = replica.Pull(context.Background(), a.s, replica.Local{Store: b.s})
+	})
+	w.settle(a, crashed)
 }
 
 func (w *world) pair() (*machine, *machine) {
@@ -191,6 +267,11 @@ func run(t *testing.T, seed uint64, cfg config) {
 		w.now += int64(w.r.IntN(2000))
 		m := w.m[w.r.IntN(len(w.m))]
 		switch roll := w.r.IntN(100); {
+		case cfg.compact && roll < 8:
+			w.compact(m)
+		case cfg.compact && roll < 12:
+			a, b := w.pair()
+			w.crashingPull(a, b)
 		case roll < 50:
 			for _, id := range w.commit(m) {
 				acked[id] = true
@@ -212,7 +293,11 @@ func run(t *testing.T, seed uint64, cfg config) {
 			m.fs = m.backup.Clone()
 			w.open(m)
 		case cfg.destroy:
-			m.fs.Rot(w.r, ".seg")
+			suffix := ".seg"
+			if cfg.compact && w.r.IntN(2) == 0 {
+				suffix = ".snap"
+			}
+			m.fs.Rot(w.r, suffix)
 			m.fs.Crash(w.r)
 			w.open(m)
 		}
@@ -231,6 +316,9 @@ func run(t *testing.T, seed uint64, cfg config) {
 		if v[id.Origin] < id.Seq {
 			t.Fatalf("seed %d: acknowledged event %s was lost", seed, id)
 		}
+	}
+	if w.m[0].s.Hash() != w.all.Hash() {
+		t.Fatalf("seed %d: final state differs from replaying every event", seed)
 	}
 }
 
@@ -258,6 +346,160 @@ func TestConvergesAfterBackupRestoreAndBitRot(t *testing.T) {
 	for seed := range seeds(t, 400) {
 		run(t, seed, config{machines: 2 + int(seed%2), steps: 300, destroy: true})
 	}
+}
+
+func TestCompactionNeverChangesTheResult(t *testing.T) {
+	for seed := range seeds(t, 400) {
+		run(t, seed, config{machines: 2 + int(seed%2), steps: 300, compact: true})
+	}
+}
+
+func TestCompactionConvergesAfterBackupRestoreAndBitRot(t *testing.T) {
+	for seed := range seeds(t, 400) {
+		run(t, seed, config{machines: 2 + int(seed%2), steps: 300, destroy: true, compact: true})
+	}
+}
+
+func pull(t *testing.T, to, from *machine) {
+	t.Helper()
+	if _, _, err := replica.Pull(context.Background(), to.s, replica.Local{Store: from.s}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func set(t *testing.T, m *machine, value int) {
+	t.Helper()
+	var over []state.Write
+	m.s.View(func(st *state.State) { over = st.Projects["p"].Get("k") })
+	body, err := store.Set("p", "k", value, over)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.s.Commit(body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func values(m *machine) []string {
+	var out []string
+	m.s.View(func(st *state.State) {
+		for _, w := range st.Projects["p"].Get("k") {
+			out = append(out, string(w.Value))
+		}
+	})
+	return out
+}
+
+func compactNow(t *testing.T, m *machine) store.CompactResult {
+	t.Helper()
+	r, err := m.s.Compact(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestAwayMacKeepsItsOwnWorkAndConflictsAfterSnapshot(t *testing.T) {
+	w := newWorld(t, 5, config{machines: 2})
+	a, b := w.m[0], w.m[1]
+	set(t, a, 1)
+	pull(t, b, a)
+	set(t, a, 2)
+	set(t, b, 3)
+	compactNow(t, a)
+	pull(t, b, a)
+	pull(t, a, b)
+	w.assertConverged(5)
+	if got := values(b); len(got) != 2 {
+		t.Fatalf("conflict was not kept: %v", got)
+	}
+}
+
+func TestSupersededWriteStaysDeadAfterPrunedSnapshot(t *testing.T) {
+	w := newWorld(t, 6, config{machines: 2})
+	a, b := w.m[0], w.m[1]
+	set(t, a, 1)
+	pull(t, b, a)
+	set(t, a, 2)
+	compactNow(t, a)
+	pull(t, b, a)
+	if got := values(b); len(got) != 1 || got[0] != "2" {
+		t.Fatalf("old value came back: %v", got)
+	}
+}
+
+func TestCompactedWriterKeepsItsChain(t *testing.T) {
+	w := newWorld(t, 7, config{machines: 2})
+	a, b := w.m[0], w.m[1]
+	set(t, a, 1)
+	compactNow(t, a)
+	set(t, a, 2)
+	pull(t, b, a)
+	w.open(a)
+	w.open(b)
+	set(t, a, 3)
+	pull(t, b, a)
+	w.assertConverged(7)
+}
+
+func TestMovingDamagedSnapshotsAsideRebuildsFromPeer(t *testing.T) {
+	w := newWorld(t, 8, config{machines: 2})
+	a, b := w.m[0], w.m[1]
+	set(t, a, 1)
+	set(t, a, 2)
+	pull(t, b, a)
+	compactNow(t, a)
+	if !a.fs.RotAll(".snap") {
+		t.Fatal("no snapshot to damage")
+	}
+	if _, err := store.Open(a.fs, home, store.Options{Name: a.name}); !errors.Is(err, store.ErrSnapshotsDamaged) {
+		t.Fatalf("got %v", err)
+	}
+	names, _ := a.fs.List(home + "/snap")
+	for _, name := range names {
+		if err := a.fs.Remove(home + "/snap/" + name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.open(a)
+	w.heal()
+	w.assertConverged(8)
+	if got := values(a); len(got) != 1 || got[0] != "2" {
+		t.Fatalf("did not recover: %v", got)
+	}
+}
+
+func TestRejectedWriterIsNotDownloadedAgain(t *testing.T) {
+	w := newWorld(t, 9, config{machines: 2})
+	a, b := w.m[0], w.m[1]
+	set(t, a, 1)
+	events, _, err := a.s.Since(store.Vector{}, 10, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := events[0]
+	bad.Body = []byte(`{"r":"p","op":"set","k":"x","v":1}`)
+	if _, err := b.s.Apply([]event.Event{bad}); err == nil {
+		t.Fatal("tampered event accepted")
+	}
+	compactNow(t, a)
+	counter := &countingPeer{Local: replica.Local{Store: a.s}}
+	if _, _, err := replica.Pull(context.Background(), b.s, counter); err == nil {
+		t.Fatal("expected a refusal")
+	}
+	if counter.chunks != 0 {
+		t.Fatalf("downloaded %d chunks before refusing", counter.chunks)
+	}
+}
+
+type countingPeer struct {
+	replica.Local
+	chunks int
+}
+
+func (c *countingPeer) Snapshot(ctx context.Context, id string, offset int64) (replica.Chunk, error) {
+	c.chunks++
+	return c.Local.Snapshot(ctx, id, offset)
 }
 
 func TestRestoredBackupGetsNewerWorkBack(t *testing.T) {

@@ -122,12 +122,15 @@ type request struct {
 	Method string       `json:"m"`
 	Hello  *Hello       `json:"hello,omitempty"`
 	Have   store.Vector `json:"have,omitempty"`
+	ID     string       `json:"id,omitempty"`
+	Offset int64        `json:"offset,omitempty"`
 }
 
 type response struct {
 	Err   string `json:"err,omitempty"`
 	Hello *Hello `json:"hello,omitempty"`
 	Batch *Batch `json:"batch,omitempty"`
+	Chunk *Chunk `json:"chunk,omitempty"`
 }
 
 func writeFrame(c net.Conn, v any) error {
@@ -283,6 +286,13 @@ func serveConn(ctx context.Context, c net.Conn, l Local) {
 				break
 			}
 			resp.Batch = &b
+		case "snapshot":
+			chunk, err := l.Snapshot(ctx, req.ID, req.Offset)
+			if err != nil {
+				resp.Err = err.Error()
+				break
+			}
+			resp.Chunk = &chunk
 		default:
 			resp.Err = "unknown method"
 		}
@@ -373,6 +383,17 @@ func (c *Client) Pull(ctx context.Context, have store.Vector) (Batch, error) {
 		return Batch{}, errors.New("empty batch")
 	}
 	return *resp.Batch, nil
+}
+
+func (c *Client) Snapshot(ctx context.Context, id string, offset int64) (Chunk, error) {
+	resp, err := c.call(ctx, request{Method: "snapshot", ID: id, Offset: offset})
+	if err != nil {
+		return Chunk{}, err
+	}
+	if resp.Chunk == nil {
+		return Chunk{}, errors.New("empty chunk")
+	}
+	return *resp.Chunk, nil
 }
 
 func (c *Client) Close() error { return c.c.Close() }

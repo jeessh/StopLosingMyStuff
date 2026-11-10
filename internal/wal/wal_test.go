@@ -15,7 +15,7 @@ const dir = "/log"
 func collect(t *testing.T, fsys vfs.FS, limit int64) (*WAL, [][]byte, Recovery) {
 	t.Helper()
 	var got [][]byte
-	w, rec, err := Open(fsys, dir, limit, func(_ Loc, b []byte) error {
+	w, rec, err := Open(fsys, dir, limit, 0, func(_ Loc, b []byte) error {
 		got = append(got, bytes.Clone(b))
 		return nil
 	})
@@ -217,5 +217,33 @@ func TestCutBytesAreAlwaysSavedAndNeverOverwritten(t *testing.T) {
 	}
 	if bad != 2 {
 		t.Fatalf("got %d saved files in %v", bad, names)
+	}
+}
+
+func TestDamageInCoveredSegmentKeepsLaterSegments(t *testing.T) {
+	m := vfs.NewMem()
+	w, _, _ := collect(t, m, 96)
+	for i := range 20 {
+		if _, err := w.Append([][]byte{rec(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !m.Rot(rand.New(rand.NewPCG(1, 1)), "000000000001.seg") {
+		t.Fatal("no first segment")
+	}
+	got := 0
+	if _, _, err := Open(m, "/log", 96, 2, func(Loc, []byte) error { got++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got < 15 {
+		t.Fatalf("only %d records survived damage in a covered segment", got)
+	}
+}
+
+func TestReadOfShortenedSegmentFailsCleanly(t *testing.T) {
+	m := vfs.NewMem()
+	w, _, _ := collect(t, m, 1<<20)
+	if _, err := w.Read(Loc{Seg: 1, Off: 5000}); err == nil {
+		t.Fatal("read past the end succeeded")
 	}
 }

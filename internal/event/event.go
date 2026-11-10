@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/jeessh/StopLosingMyStuff/internal/hlc"
 )
@@ -26,6 +28,18 @@ type ID struct {
 }
 
 func (id ID) String() string { return fmt.Sprintf("%s:%d", id.Origin, id.Seq) }
+
+func ParseID(s string) (ID, bool) {
+	i := strings.LastIndexByte(s, ':')
+	if i <= 0 {
+		return ID{}, false
+	}
+	seq, err := strconv.ParseUint(s[i+1:], 10, 64)
+	if err != nil {
+		return ID{}, false
+	}
+	return ID{Origin: s[:i], Seq: seq}, true
+}
 
 // Body travels as opaque bytes so older builds can relay events they can't read.
 type Body struct {

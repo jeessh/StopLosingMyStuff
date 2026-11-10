@@ -140,3 +140,18 @@ func TestNotesAreRedacted(t *testing.T) {
 		t.Fatal("note was not stored")
 	}
 }
+
+func TestOnlyRecentlySeenPairedPeersHoldBackCleanup(t *testing.T) {
+	now := time.UnixMilli(1_000_000_000_000)
+	recent := store.Vector{"a": 3}
+	peers := []replica.PeerConfig{{Name: "recent"}, {Name: "old"}, {Name: "never"}}
+	acks := map[string]peerAck{
+		"recent":   {Vector: recent, Seen: now.Add(-time.Hour).UnixMilli()},
+		"old":      {Vector: store.Vector{}, Seen: now.Add(-peerPatience - time.Hour).UnixMilli()},
+		"unpaired": {Vector: store.Vector{}, Seen: now.UnixMilli()},
+	}
+	wait := waitFor(peers, acks, now)
+	if len(wait) != 1 || wait[0]["a"] != 3 {
+		t.Fatalf("wait %v", wait)
+	}
+}

@@ -52,6 +52,12 @@ func (c *Clock) Now() T {
 	return c.last
 }
 
+func (c *Clock) Last() T {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.last
+}
+
 func (c *Clock) Observe(t T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
