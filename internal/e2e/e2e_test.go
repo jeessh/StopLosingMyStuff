@@ -18,12 +18,12 @@ import (
 var bin string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "slse2e")
+	dir, err := os.MkdirTemp("", "slmse2e")
 	if err != nil {
 		panic(err)
 	}
-	bin = filepath.Join(dir, "sls")
-	out, err := exec.Command("go", "build", "-race", "-o", bin, "github.com/jeessh/StopLosingMyStuff/cmd/sls").CombinedOutput()
+	bin = filepath.Join(dir, "slms")
+	out, err := exec.Command("go", "build", "-race", "-o", bin, "github.com/jeessh/StopLosingMyStuff/cmd/slms").CombinedOutput()
 	if err != nil {
 		panic(fmt.Sprintf("%v: %s", err, out))
 	}
@@ -45,7 +45,7 @@ type mac struct {
 
 func newMac(t *testing.T, name string) *mac {
 	t.Helper()
-	home, err := os.MkdirTemp("/tmp", "sls")
+	home, err := os.MkdirTemp("/tmp", "slms")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func newMac(t *testing.T, name string) *mac {
 func (m *mac) env() []string {
 	fake := filepath.Join(m.home, "fake-claude")
 	_ = os.WriteFile(fake, []byte("#!/bin/sh\ncat >/dev/null\necho '{\"goal\":\"ship the demo\",\"next\":\"write docs\",\"decisions\":[\"use go\"]}'\n"), 0o700)
-	return append(os.Environ(), "HOME="+m.home, "SLS_HOME="+m.data, "SLS_CLAUDE_ROOT="+m.root, "SLS_NAME="+m.name, "SLS_CLAUDE_BIN="+fake)
+	return append(os.Environ(), "HOME="+m.home, "SLMS_HOME="+m.data, "SLMS_CLAUDE_ROOT="+m.root, "SLMS_NAME="+m.name, "SLMS_CLAUDE_BIN="+fake)
 }
 
 func (m *mac) cmd(dir string, args ...string) (string, error) {
@@ -89,7 +89,7 @@ func (m *mac) run(args ...string) string {
 	m.t.Helper()
 	out, err := m.cmd(m.home, args...)
 	if err != nil {
-		m.t.Fatalf("%s: sls %v: %v: %s", m.name, args, err, out)
+		m.t.Fatalf("%s: slms %v: %v: %s", m.name, args, err, out)
 	}
 	return out
 }

@@ -24,28 +24,28 @@ import (
 	"github.com/jeessh/StopLosingMyStuff/internal/vfs"
 )
 
-const usage = `sls keeps project context in sync between your Macs.
+const usage = `slms keeps project context in sync between your Macs.
 
-  sls init                       set up this machine
-  sls install [--no-launchd]     add Claude Code hooks and start at login
-  sls id                         print the line to pair with this machine
-  sls peer add NAME FINGERPRINT ADDR[,ADDR...]
-  sls peer ls | rm NAME
-  sls status                     every project across every machine
-  sls brief [DIR]                what a new session would be told
-  sls note TEXT                  record a decision
-  sls decisions [DIR]            every decision recorded for a project
-  sls goal TEXT | next TEXT      set the goal or next step, settles conflicts
-  sls track [DIR]                follow a folder that isn't a git repo
-  sls service add NAME PORT      watch a local service
-  sls doctor                     check that everything is healthy
-  sls compact                    shrink the log now
-  sls daemon [--listen ADDR] [--no-summaries]
+  slms init                       set up this machine
+  slms install [--no-launchd]     add Claude Code hooks and start at login
+  slms id                         print the line to pair with this machine
+  slms peer add NAME FINGERPRINT ADDR[,ADDR...]
+  slms peer ls | rm NAME
+  slms status                     every project across every machine
+  slms brief [DIR]                what a new session would be told
+  slms note TEXT                  record a decision
+  slms decisions [DIR]            every decision recorded for a project
+  slms goal TEXT | next TEXT      set the goal or next step, settles conflicts
+  slms track [DIR]                follow a folder that isn't a git repo
+  slms service add NAME PORT      watch a local service
+  slms doctor                     check that everything is healthy
+  slms compact                    shrink the log now
+  slms daemon [--listen ADDR] [--no-summaries]
 `
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "sls:", err)
+		fmt.Fprintln(os.Stderr, "slms:", err)
 		os.Exit(1)
 	}
 }
@@ -59,21 +59,21 @@ func home() string {
 }
 
 func dataDir() string {
-	if d := os.Getenv("SLS_HOME"); d != "" {
+	if d := os.Getenv("SLMS_HOME"); d != "" {
 		return d
 	}
 	return filepath.Join(home(), ".stoplosing")
 }
 
 func claudeRoot() string {
-	if d := os.Getenv("SLS_CLAUDE_ROOT"); d != "" {
+	if d := os.Getenv("SLMS_CLAUDE_ROOT"); d != "" {
 		return d
 	}
 	return filepath.Join(home(), ".claude", "projects")
 }
 
 func hostname() string {
-	if n := os.Getenv("SLS_NAME"); n != "" {
+	if n := os.Getenv("SLMS_NAME"); n != "" {
 		return n
 	}
 	h, err := os.Hostname()
@@ -120,7 +120,7 @@ func run(args []string) error {
 		fmt.Print(usage)
 		return nil
 	}
-	return fmt.Errorf("unknown command %q, run sls help", cmd)
+	return fmt.Errorf("unknown command %q, run slms help", cmd)
 }
 
 func dirArg(args []string) string {
@@ -163,7 +163,7 @@ func printID() error {
 
 func peer(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: sls peer add|ls|rm")
+		return errors.New("usage: slms peer add|ls|rm")
 	}
 	fsys, dir := vfs.OS{}, dataDir()
 	peers, err := app.LoadPeers(fsys, dir)
@@ -178,7 +178,7 @@ func peer(args []string) error {
 		return nil
 	case "add":
 		if len(args) != 4 {
-			return errors.New("usage: sls peer add NAME FINGERPRINT ADDR[,ADDR...]")
+			return errors.New("usage: slms peer add NAME FINGERPRINT ADDR[,ADDR...]")
 		}
 		addrs := strings.Split(args[3], ",")
 		for i, a := range addrs {
@@ -198,7 +198,7 @@ func peer(args []string) error {
 		return app.SavePeers(fsys, dir, append(kept, replica.PeerConfig{Name: args[1], Fingerprint: args[2], Addrs: addrs}))
 	case "rm":
 		if len(args) != 2 {
-			return errors.New("usage: sls peer rm NAME")
+			return errors.New("usage: slms peer rm NAME")
 		}
 		kept := peers[:0]
 		for _, p := range peers {
@@ -213,7 +213,7 @@ func peer(args []string) error {
 
 func service(args []string) error {
 	if len(args) != 3 || args[0] != "add" {
-		return errors.New("usage: sls service add NAME PORT")
+		return errors.New("usage: slms service add NAME PORT")
 	}
 	port, err := strconv.Atoi(args[2])
 	if err != nil || port < 1 || port > 65535 {
@@ -250,7 +250,7 @@ func runDaemon(args []string) error {
 		if err := os.MkdirAll(work, 0o700); err != nil {
 			return err
 		}
-		cfg.Summarizer = summary.CLI{Bin: os.Getenv("SLS_CLAUDE_BIN"), Dir: work}
+		cfg.Summarizer = summary.CLI{Bin: os.Getenv("SLMS_CLAUDE_BIN"), Dir: work}
 	}
 	return daemon.Run(ctx, cfg)
 }

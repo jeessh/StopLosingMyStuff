@@ -23,7 +23,7 @@ import (
 const (
 	// Change the magic whenever the format changes meaning, so an older build
 	// refuses a snapshot instead of half understanding it.
-	snapMagic  = "SLSSNAP1\n"
+	snapMagic  = "SLMSSNAP1\n"
 	snapSuffix = ".snap"
 	sumSize    = 64
 	maxSeq     = 1 << 62

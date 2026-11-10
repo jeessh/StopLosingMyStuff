@@ -80,7 +80,7 @@ func generate(certPath, keyPath string) error {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "sls"},
+		Subject:      pkix.Name{CommonName: "slms"},
 		NotBefore:    time.Now().Add(-24 * time.Hour),
 		NotAfter:     time.Now().AddDate(50, 0, 0),
 	}

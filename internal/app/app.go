@@ -404,7 +404,7 @@ func (a *App) Doctor() string {
 	}
 	settings, _ := a.FS.ReadFile(filepath.Join(a.Home, ".claude", "settings.json"))
 	if !strings.Contains(string(settings), " hook SessionStart") {
-		b.WriteString("PROBLEM: Claude Code hooks are not installed, run sls install\n")
+		b.WriteString("PROBLEM: Claude Code hooks are not installed, run slms install\n")
 	}
 	return b.String()
 }

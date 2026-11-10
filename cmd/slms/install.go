@@ -15,7 +15,7 @@ import (
 	"github.com/jeessh/StopLosingMyStuff/internal/vfs"
 )
 
-const launchLabel = "com.stoplosing.sls"
+const launchLabel = "com.stoplosing.slms"
 
 var hookEvents = []string{"SessionStart", "SessionEnd", "PreCompact"}
 
@@ -50,7 +50,7 @@ func installHooks(path, bin string) error {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			return fmt.Errorf("%s is not valid JSON, leaving it alone: %w", path, err)
 		}
-		if err := os.WriteFile(path+".sls-backup", data, 0o600); err != nil {
+		if err := os.WriteFile(path+".slms-backup", data, 0o600); err != nil {
 			return err
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -87,7 +87,7 @@ func hasHook(list []any, suffix string) bool {
 		inner, _ := g["hooks"].([]any)
 		for _, h := range inner {
 			m, _ := h.(map[string]any)
-			if c, _ := m["command"].(string); strings.Contains(c, "sls") && strings.HasSuffix(c, suffix) {
+			if c, _ := m["command"].(string); strings.Contains(c, "slms") && strings.HasSuffix(c, suffix) {
 				return true
 			}
 		}
@@ -128,7 +128,7 @@ func plist(bin, dir, path string) string {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>` + e(path) + `</string>
-    <key>SLS_HOME</key><string>` + e(dir) + `</string>
+    <key>SLMS_HOME</key><string>` + e(dir) + `</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

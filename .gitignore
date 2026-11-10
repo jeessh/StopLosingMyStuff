@@ -1,4 +1,4 @@
-/sls
+/slms
 *.test
 *.out
 .DS_Store

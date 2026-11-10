@@ -33,10 +33,10 @@ What can go wrong, what happens, and the test that proves it.
 | A brand new Mac pairs after compaction | It starts from the snapshot | `TestCompactedMacRestartsAndCatchesUpANewOne` |
 | Snapshot bigger than one network frame | Sent in 4 MB pieces and checked as a whole | `TestLargeSnapshotCrossesTheNetworkInChunks` |
 | Snapshot damaged in transit | Refused, nothing changes | `TestDamagedTransferIsRefused` |
-| Snapshot disagrees with history this Mac has | Refused and shown in `sls doctor` | `TestSnapshotFromAnotherHistoryIsRefused` |
+| Snapshot disagrees with history this Mac has | Refused and shown in `slms doctor` | `TestSnapshotFromAnotherHistoryIsRefused` |
 | Peer compacted past a writer this Mac rejected | Sync from that peer stops with a clear error and doesn't download the snapshot until a restart clears the rejection | `TestRejectedWriterIsNotDownloadedAgain` |
 | Entry from a newer version this build can't read | Kept whole in the snapshot and passed along, and can't revive anything once a Mac that understands it has moved on | `TestEventsFromNewerBuildsSurviveCompaction`, `TestStaleRelayedEventCannotReviveAReplacedValue` |
-| `sls status` reads while the daemon compacts | The read notices and starts over | `TestReadOnlySeesCompactedStore` |
+| `slms status` reads while the daemon compacts | The read notices and starts over | `TestReadOnlySeesCompactedStore` |
 | Any mix of the above across 2 or 3 Macs | Final state matches replaying every acknowledged event | `TestCompactionNeverChangesTheResult` |
 
 ## Syncing
@@ -52,7 +52,7 @@ What can go wrong, what happens, and the test that proves it.
 | Both Macs change the same thing offline | Both are kept and shown as a conflict | `TestSurvivesKillAndOfflineConflict` |
 | A summary lands during a conflict | It can only update its own side | `TestSummaryCannotEraseAnOpenConflict` |
 | An old session is summarized late | It can't replace a newer summary | `TestOlderSummaryCannotReplaceNewerOne` |
-| An event was altered | Hash fails, that writer is stopped, `sls doctor` reports it | `TestTamperedEventIsQuarantined` |
+| An event was altered | Hash fails, that writer is stopped, `slms doctor` reports it | `TestTamperedEventIsQuarantined` |
 | Unknown device connects | Dropped during the TLS handshake | `TestStrangerIsRejected`, `TestWrongServerIsRejected` |
 | Idle connections try to use up the server | Handshakes have their own limit and timeout | `TestIdleStrangersDoNotBlockPeers` |
 | A paired Mac sends a nonsense request | Answered with nothing instead of crashing | `TestHostileVectorCannotCrashTheServer` |
@@ -65,7 +65,7 @@ What can go wrong, what happens, and the test that proves it.
 |---|---|---|
 | Session breaks mid generation | Only whole lines are read. The half-written one is picked up if it ever finishes | `TestHalfWrittenLineWaitsForTheRest` |
 | A tool started and never returned | Shown as unfinished, outcome unknown, verify before repeating | `TestToolWithNoResultStaysPending`, `TestCondition` |
-| Garbage line | Counted and skipped. `sls doctor` flags it if many are bad, in case the format changed | `TestGarbageLineIsCountedNotFatal` |
+| Garbage line | Counted and skipped. `slms doctor` flags it if many are bad, in case the format changed | `TestGarbageLineIsCountedNotFatal` |
 | Huge line | Skipped without running out of memory | `TestOversizedLineIsSkipped` |
 | Transcript replaced | Read again from the start | `TestReplacedFileIsReadFromTheStart` |
 | Daemon restarts | Continues from a saved position, and repeats are harmless | `TestCursorSurvivesRestartWithoutRereading` |
@@ -84,7 +84,7 @@ What can go wrong, what happens, and the test that proves it.
 |---|---|---|
 | Same repo at different paths | Identified by git remote, ssh and https match | `TestSameRepoGetsSameIDAtDifferentPaths`, `TestNormalizeRemote` |
 | Worktrees and subfolders | Count as the same project | `TestSubdirAndWorktreeResolveToTheProject` |
-| Folders without git, like game mods | `sls track` adds a small ID file that survives copying | `TestTrackedFolderIdentitySurvivesACopy` |
+| Folders without git, like game mods | `slms track` adds a small ID file that survives copying | `TestTrackedFolderIdentitySurvivesACopy` |
 | Paths in a briefing | Relative to the project, so they work on the other Mac | `TestHandoffAcrossMachines` |
 | Git times out, or macOS blocks folder access | The session waits and retries instead of being filed under the wrong project | `TestGitFailureIsNotTreatedAsNoRepo` |
 | A helper process hangs | It's killed on a timeout, even if its children hold the pipes open | `TestHungGitChildDoesNotHangTheCaller` |

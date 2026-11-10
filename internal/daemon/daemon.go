@@ -733,7 +733,7 @@ func (d *daemon) extra() string {
 	defer d.mu.Unlock()
 	var b strings.Builder
 	if d.stuck > 0 {
-		fmt.Fprintf(&b, "PROBLEM: %d sessions waiting because git could not read their folder, macOS may need to allow access for sls\n", d.stuck)
+		fmt.Fprintf(&b, "PROBLEM: %d sessions waiting because git could not read their folder, macOS may need to allow access for slms\n", d.stuck)
 	}
 	if len(peers) == 0 {
 		b.WriteString("no peers paired yet\n")

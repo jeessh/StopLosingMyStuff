@@ -323,7 +323,7 @@ func run(t *testing.T, seed uint64, cfg config) {
 }
 
 func seeds(t *testing.T, fallback uint64) uint64 {
-	if s := os.Getenv("SLS_SIM_SEEDS"); s != "" {
+	if s := os.Getenv("SLMS_SIM_SEEDS"); s != "" {
 		n, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
 			t.Fatal(err)

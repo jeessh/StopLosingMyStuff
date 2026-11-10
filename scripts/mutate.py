@@ -78,7 +78,7 @@ MUTANTS = [
 
 
 def main():
-    env = dict(os.environ, SLS_SIM_SEEDS="300")
+    env = dict(os.environ, SLMS_SIM_SEEDS="300")
     missed = 0
     for name, path, old, new, packages in MUTANTS:
         with tempfile.TemporaryDirectory() as tmp:

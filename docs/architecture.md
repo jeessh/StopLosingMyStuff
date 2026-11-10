@@ -9,7 +9,7 @@ flowchart LR
   subgraph A["Mac A"]
     T["Claude Code<br/>transcript files"] -->|"tail new lines"| W["capture<br/>extract facts, strip secrets"]
     H["Claude Code hooks"] -->|"session ended / compacting"| D
-    W --> D["sls daemon"]
+    W --> D["slms daemon"]
     D -->|"session gone quiet"| S["claude -p (haiku)<br/>goal, next step, decisions"]
     S --> D
     G["git status<br/>service ports"] --> D
@@ -56,7 +56,7 @@ flowchart LR
   B --> Y["Mac B offline:<br/>next = 'roll it back'"]
   X --> C{"after reconnecting<br/>both are live"}
   Y --> C
-  C -->|"sls next ..."| R["new write replaces both"]
+  C -->|"slms next ..."| R["new write replaces both"]
 ```
 
 This doesn't depend on clocks at all, which is why a Mac with the wrong date can't win or lose a conflict.
@@ -107,7 +107,7 @@ A snapshot also records how far it has seen for each writer. That's what lets th
 | Pull only replication | Retrying is always safe because a retry is the same question again. There are no acks to lose | A short delay, softened by a hello that tells the other side to pull now |
 | Pinned TLS certificates instead of trusting the network | Works the same over any network and doesn't depend on Tailscale being set up | Pairing is one copy and paste each way |
 | Dial every address at once | Going from Ethernet to home Wi-Fi needs no config change, the address that works wins | A few wasted connection attempts |
-| Tail transcript files instead of relying on hooks | Hooks don't run when the battery dies. Files are already on disk | Depends on a transcript format that isn't a public API, so `sls doctor` watches for it breaking |
+| Tail transcript files instead of relying on hooks | Hooks don't run when the battery dies. Files are already on disk | Depends on a transcript format that isn't a public API, so `slms doctor` watches for it breaking |
 | Interrupted is calculated when read | A session that died suddenly can't write "I died" | Nothing really |
 | Facts need no AI, summaries are optional | Files, commands and git state work offline and for free. If the summary call fails, nothing important is missing | Goal and next step wait until a session goes quiet |
 | Briefings are labeled as background | Old transcripts can contain anything, so they must not read as instructions | A sentence of context in each session |

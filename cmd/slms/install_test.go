@@ -16,7 +16,7 @@ func TestInstallHooksKeepsExistingSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := installHooks(path, "/bin/sls"); err != nil {
+		if err := installHooks(path, "/bin/slms"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -31,7 +31,7 @@ func TestInstallHooksKeepsExistingSettings(t *testing.T) {
 	if got.Model != "x" || len(got.Hooks["Stop"]) != 1 || len(got.Hooks["SessionStart"]) != 2 || len(got.Hooks["PreCompact"]) != 1 {
 		t.Fatalf("settings = %s", data)
 	}
-	backup, _ := os.ReadFile(path + ".sls-backup")
+	backup, _ := os.ReadFile(path + ".slms-backup")
 	if !strings.Contains(string(backup), "ding") {
 		t.Fatal("no backup")
 	}
@@ -40,7 +40,7 @@ func TestInstallHooksKeepsExistingSettings(t *testing.T) {
 func TestInstallHooksRefusesBrokenSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	_ = os.WriteFile(path, []byte("{broken"), 0o600)
-	if err := installHooks(path, "/bin/sls"); err == nil {
+	if err := installHooks(path, "/bin/slms"); err == nil {
 		t.Fatal("overwrote invalid settings")
 	}
 	if data, _ := os.ReadFile(path); string(data) != "{broken" {
@@ -49,7 +49,7 @@ func TestInstallHooksRefusesBrokenSettings(t *testing.T) {
 }
 
 func TestPlistIsValidXMLWithOddPaths(t *testing.T) {
-	out := plist(`/Users/a&b/sls`, `/Users/a&b/.stoplosing`, `/bin:/a<b`)
+	out := plist(`/Users/a&b/slms`, `/Users/a&b/.stoplosing`, `/bin:/a<b`)
 	d := xml.NewDecoder(strings.NewReader(out))
 	d.Strict = false
 	for {
@@ -70,7 +70,7 @@ func TestInstallHooksKeepsASymlink(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := installHooks(link, "/bin/sls"); err != nil {
+	if err := installHooks(link, "/bin/slms"); err != nil {
 		t.Fatal(err)
 	}
 	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
