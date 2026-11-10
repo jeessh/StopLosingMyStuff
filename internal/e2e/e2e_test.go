@@ -315,8 +315,19 @@ func TestKillDuringWritesLosesNothing(t *testing.T) {
 		}
 		return true
 	})
-	if got := a.run("decisions", repoA); strings.Count(got, "decision-") != len(acked) {
-		t.Fatalf("got %d notes, acknowledged %d", strings.Count(got, "decision-"), len(acked))
+	seen := map[string]bool{}
+	for _, line := range strings.Split(a.run("decisions", repoA), "\n") {
+		if strings.Contains(line, "decision-") {
+			if seen[line] {
+				t.Fatalf("note saved twice: %s", line)
+			}
+			seen[line] = true
+		}
+	}
+	// A kill can land after a note is saved but before the reply, so there can
+	// be more notes than acknowledgements, never fewer.
+	if len(seen) < len(acked) {
+		t.Fatalf("got %d notes, acknowledged %d", len(seen), len(acked))
 	}
 	if out := a.run("doctor"); strings.Contains(out, "stopped accepting") {
 		t.Fatalf("doctor:\n%s", out)
